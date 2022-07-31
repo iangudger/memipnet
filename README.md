@@ -4,4 +4,4 @@ Allows fully hermetic testing of code which depends on TCP and/or UDP loopback n
 
 This is a more compatible, but heavier weight alternative to [`memnet`](https://github.com/iangudger/memnet).
 
-This package uses gVisor's pure Go network stack.
+This package uses [gVisor](https://gvisor.dev)'s [pure Go network stack](https://cs.opensource.google/gvisor/gvisor/+/master:pkg/tcpip/).
