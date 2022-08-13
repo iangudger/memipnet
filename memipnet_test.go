@@ -17,10 +17,13 @@ package memipnet
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"testing"
 
 	"golang.org/x/net/nettest"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestTCPListenDial(t *testing.T) {
@@ -118,5 +121,64 @@ func TestTCPListenDial(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestNetHTTP(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const want = "hello world"
+
+	s, err := NewStack()
+	if err != nil {
+		t.Fatal("NewStack:", err)
+	}
+	defer s.Close()
+
+	l, err := s.Listen(ctx, "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatal(`Listen("tcp", "127.0.0.1:80"):`, err)
+	}
+	defer l.Close()
+
+	server := http.Server{Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if _, err := writer.Write([]byte(want)); err != nil {
+			t.Error("http.ResponseWriter.Write:", err)
+		}
+	})}
+
+	var eg errgroup.Group
+	eg.Go(func() error {
+		return server.Serve(l)
+	})
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = s.DialContext
+	client := http.Client{Transport: transport}
+
+	response, err := client.Get(fmt.Sprintf("http://%s/", l.Addr()))
+	if err != nil {
+		t.Fatal("http.Client.Get:", err)
+	}
+
+	if response.StatusCode != http.StatusOK {
+		t.Errorf("got http.Response.StatusCode = %d, want = %d", response.StatusCode, http.StatusOK)
+	}
+	got, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal("io.ReadAll(http.Response.Body):", err)
+	}
+	if got := string(got); got != want {
+		t.Errorf("got http.Response.Body = %q, want = %q", got, want)
+	}
+
+	if err := server.Shutdown(ctx); err != nil {
+		t.Fatal("http.Server.Shutdown:", err)
+	}
+
+	if err := eg.Wait(); err != http.ErrServerClosed {
+		t.Errorf("got http.Server.Serve = %v, want = %v", err, http.ErrServerClosed)
 	}
 }
